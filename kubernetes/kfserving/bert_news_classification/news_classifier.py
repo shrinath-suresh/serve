@@ -10,6 +10,7 @@ import pytorch_lightning as pl
 import requests
 import torch
 import torch.nn.functional as F
+import transformers
 from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import (
     EarlyStopping,
@@ -22,7 +23,6 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torchtext.datasets.text_classification import URLS
 from torchtext.utils import download_from_url, extract_archive
-from transformers import BertModel, BertTokenizer, AdamW
 
 
 class AGNewsDataset(Dataset):
@@ -139,7 +139,7 @@ class BertDataModule(pl.LightningDataModule):
             else:
                 raise RuntimeError("Error in fetching the vocab file")
 
-        self.tokenizer = BertTokenizer(self.VOCAB_FILE)
+        self.tokenizer = transformers.BertTokenizer(self.VOCAB_FILE)
 
         RANDOM_SEED = 42
         seed_everything(RANDOM_SEED)
@@ -243,7 +243,7 @@ class BertNewsClassifier(pl.LightningModule):
         self.test_acc = Accuracy()
 
         self.PRE_TRAINED_MODEL_NAME = "bert-base-uncased"
-        self.bert_model = BertModel.from_pretrained(self.PRE_TRAINED_MODEL_NAME)
+        self.bert_model = transformers.BertModel.from_pretrained(self.PRE_TRAINED_MODEL_NAME)
         for param in self.bert_model.parameters():
             param.requires_grad = False
         self.drop = nn.Dropout(p=0.2)
@@ -263,8 +263,14 @@ class BertNewsClassifier(pl.LightningModule):
 
         :return: output - Type of news for the given news snippet
         """
-        _, pooled_output = self.bert_model(input_ids=input_ids, attention_mask=attention_mask)
-        output = F.relu(self.fc1(pooled_output))
+        transformers_version = transformers.__version__
+        if transformers_version.startswith("3."):
+            _, pooled_output = self.bert_model(input_ids=input_ids, attention_mask=attention_mask)
+            output = F.relu(self.fc1(pooled_output))
+        else:
+            pooled_output= self.bert_model(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
+            output = F.relu(self.fc1(pooled_output.pooler_output))
+
         output = self.drop(output)
         output = self.out(output)
         return output
@@ -349,7 +355,7 @@ class BertNewsClassifier(pl.LightningModule):
 
         :return: output - Initialized optimizer and scheduler
         """
-        optimizer = AdamW(self.parameters(), lr=self.args["lr"])
+        optimizer = transformers.AdamW(self.parameters(), lr=self.args["lr"])
         scheduler = {
             "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer,
